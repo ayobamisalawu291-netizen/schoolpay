@@ -1,5 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isVerifiedSessionCookie, verifiedSessionCookieName } from "@/lib/auth-assurance";
+
+function needsEmailOtp(pathname: string) {
+  return /^\/(?:parent|school|admin)(?:\/|$)/.test(pathname) || /^\/api\/(?:parent|school)(?:\/|$)/.test(pathname);
+}
 
 export async function updateSession(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -19,6 +24,21 @@ export async function updateSession(request: NextRequest) {
   });
 
   // Verify the token before treating it as a valid user session.
-  await supabase.auth.getClaims();
+  const { data } = await supabase.auth.getClaims();
+  if (needsEmailOtp(request.nextUrl.pathname) && !isVerifiedSessionCookie(
+    request.cookies.get(verifiedSessionCookieName())?.value,
+    data?.claims?.sub,
+    data?.claims?.session_id
+  )) {
+    const blocked = request.nextUrl.pathname.startsWith("/api/")
+      ? NextResponse.json({ error: "Sign in and verify the code sent to your email." }, { status: 401 })
+      : NextResponse.redirect(new URL("/login", request.url));
+    response.cookies.getAll().forEach((cookie) => blocked.cookies.set(cookie));
+    for (const header of ["cache-control", "expires", "pragma"]) {
+      const value = response.headers.get(header);
+      if (value) blocked.headers.set(header, value);
+    }
+    return blocked;
+  }
   return response;
 }

@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { createClient as createSupabaseJsClient, type Session, type User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import type { AppRole } from "@/lib/roles";
+import { createVerifiedSessionCookie, verifiedSessionCookieMaxAge, verifiedSessionCookieName } from "@/lib/auth-assurance";
 import {
   decryptEmailOtpChallenge,
   digestEmailOtp,
@@ -170,6 +171,21 @@ export async function verifyLoginEmailOtp(_state: AuthState, formData: FormData)
     return { error: "Your sign-in expired. Sign in again to request a new code." };
   }
 
+  const { data: claimData } = await supabase.auth.getClaims();
+  const proof = createVerifiedSessionCookie(claimData?.claims?.sub, claimData?.claims?.session_id);
+  if (!proof) {
+    await supabase.auth.signOut({ scope: "local" });
+    cookieStore.delete(emailOtpCookieName());
+    return { error: "We couldn't finish your sign-in. Please try again." };
+  }
+  cookieStore.set(verifiedSessionCookieName(), proof, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+    maxAge: verifiedSessionCookieMaxAge()
+  });
+
   cookieStore.delete(emailOtpCookieName());
   redirect(await destinationForRole(supabase));
 }
@@ -243,11 +259,11 @@ export async function signUp(_state: AuthState, formData: FormData): Promise<Aut
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
-    options: { data: { display_name: parsed.data.name }, emailRedirectTo: `${siteUrl}/auth/callback?next=/parent/dashboard` }
+    options: { data: { display_name: parsed.data.name }, emailRedirectTo: `${siteUrl}/auth/callback` }
   });
   if (error) return { error: "We could not create your account. Check your details or try signing in." };
   if (data.session) {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: "local" });
     return { error: "Email confirmation is disabled in the Supabase project. Please contact support before creating an account." };
   }
   return { success: "We've sent a confirmation email. Open it to verify your address, then come back here to sign in. Check your spam folder if it doesn't arrive." };
@@ -264,7 +280,7 @@ export async function resendSignupConfirmation(_state: AuthState, formData: Form
   const { error } = await supabase.auth.resend({
     type: "signup",
     email: email.data,
-    options: { emailRedirectTo: `${siteUrl}/auth/callback?next=/parent/dashboard` }
+    options: { emailRedirectTo: `${siteUrl}/auth/callback` }
   });
   if (error) return { error: "We couldn't request a new email right now. Check the address and try again later." };
   return { success: "If this address has an account waiting for confirmation, a new email is on its way." };
@@ -292,11 +308,14 @@ export async function updatePassword(_state: AuthState, formData: FormData): Pro
   if (!claims) return { error: "Your reset link is invalid or has expired. Request a new one." };
   const { error } = await supabase.auth.updateUser({ password: password.data });
   if (error) return { error: "We could not update your password. Request a new reset link and try again." };
-  redirect(await destinationForRole(supabase));
+  await supabase.auth.signOut({ scope: "local" });
+  (await cookies()).delete(verifiedSessionCookieName());
+  redirect("/login?password=updated");
 }
 
 export async function signOut() {
   const supabase = await createClient();
-  if (supabase) await supabase.auth.signOut();
+  if (supabase) await supabase.auth.signOut({ scope: "local" });
+  (await cookies()).delete(verifiedSessionCookieName());
   redirect("/login");
 }
