@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, randomInt } from "node:crypto";
+import nodemailer from "nodemailer";
 import { z } from "zod";
 
 const COOKIE_NAME = "schoolpay_email_otp";
@@ -24,11 +25,27 @@ function deriveKey(purpose: string) {
   return Buffer.from(hkdfSync("sha256", Buffer.from(secret), Buffer.from("schoolpay-auth"), Buffer.from(purpose), 32));
 }
 
-export function getEmailOtpConfig() {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
+type EmailOtpConfig =
+  | { provider: "smtp"; host: string; port: 465 | 587; user: string; password: string; from: string }
+  | { provider: "resend"; apiKey: string; from: string };
+
+export function getEmailOtpConfig(): EmailOtpConfig | null {
   const from = process.env.AUTH_EMAIL_FROM?.trim();
+  const host = process.env.AUTH_SMTP_HOST?.trim();
+  const rawPort = process.env.AUTH_SMTP_PORT?.trim();
+  const user = process.env.AUTH_SMTP_USER?.trim();
+  const password = process.env.AUTH_SMTP_PASS?.trim();
+  const port = rawPort === "465" ? 465 : rawPort === "587" ? 587 : null;
+  const smtpIsPartiallyConfigured = Boolean(host || rawPort || user || password);
+
+  if (smtpIsPartiallyConfigured) {
+    if (!host || !port || !user || !password || !from) return null;
+    return { provider: "smtp", host, port, user, password, from };
+  }
+
+  const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey || !from) return null;
-  return { apiKey, from };
+  return { provider: "resend", apiKey, from };
 }
 
 export function generateEmailOtp() {
@@ -78,6 +95,36 @@ export async function sendEmailOtp(to: string, code: string) {
   const config = getEmailOtpConfig();
   if (!config) return false;
 
+  const text = `Your SchoolPay verification code is ${code}. It expires in 10 minutes. If you didn't request this code, you can ignore this email.`;
+  const html = `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;color:#183249"><p style="font-size:16px">Use this code to finish signing in to SchoolPay:</p><p style="font-size:32px;font-weight:700;letter-spacing:8px;margin:24px 0">${code}</p><p>This code expires in 10 minutes. If you didn't request it, you can ignore this email.</p></div>`;
+
+  if (config.provider === "smtp") {
+    const transport = nodemailer.createTransport({
+      host: config.host,
+      port: config.port,
+      secure: config.port === 465,
+      requireTLS: config.port === 587,
+      auth: { user: config.user, pass: config.password },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
+      disableFileAccess: true,
+      disableUrlAccess: true
+    });
+    try {
+      const result = await transport.sendMail({
+        from: config.from,
+        to,
+        subject: "Your SchoolPay sign-in code",
+        text,
+        html
+      });
+      return result.accepted.some((address) => address.toLowerCase() === to.toLowerCase());
+    } finally {
+      transport.close();
+    }
+  }
+
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
@@ -87,8 +134,8 @@ export async function sendEmailOtp(to: string, code: string) {
       from: config.from,
       to: [to],
       subject: "Your SchoolPay sign-in code",
-      text: `Your SchoolPay verification code is ${code}. It expires in 10 minutes. If you didn't request this code, you can ignore this email.`,
-      html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;color:#183249"><p style="font-size:16px">Use this code to finish signing in to SchoolPay:</p><p style="font-size:32px;font-weight:700;letter-spacing:8px;margin:24px 0">${code}</p><p>This code expires in 10 minutes. If you didn't request it, you can ignore this email.</p></div>`
+      text,
+      html
     })
   });
   return response.ok;
