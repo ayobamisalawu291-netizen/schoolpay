@@ -1,0 +1,3 @@
+import Link from "next/link";import type { Metadata } from "next";import{PasswordForm}from"@/components/password-form";
+export const metadata:Metadata={title:"Choose a new password",robots:{index:false,follow:false}};
+export default function ResetPassword(){return <main className="auth-main"><section className="auth-box"><Link className="brand" href="/"><span className="brand-mark">S</span><span>school<span className="brand-pay">pay</span></span></Link><h2>Choose a new password</h2><p>Use at least 10 characters. Your reset link must still be valid.</p><PasswordForm mode="update"/><p className="auth-switch"><Link href="/login">Back to log in</Link></p></section></main>}

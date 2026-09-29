@@ -1,0 +1,3 @@
+import Link from "next/link";import type { Metadata } from "next";import{PasswordForm}from"@/components/password-form";
+export const metadata:Metadata={title:"Reset password",robots:{index:false,follow:false}};
+export default function ForgotPassword(){return <main className="auth-main"><section className="auth-box"><Link className="brand" href="/"><span className="brand-mark">S</span><span>school<span className="brand-pay">pay</span></span></Link><h2>Reset your password</h2><p>Enter your account email and we'll send a reset link if an account matches.</p><PasswordForm mode="request"/><p className="auth-switch"><Link href="/login">Back to log in</Link></p></section></main>}
