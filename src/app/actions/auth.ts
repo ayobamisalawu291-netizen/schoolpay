@@ -7,6 +7,7 @@ import { createClient as createSupabaseJsClient, type Session, type User } from 
 import { createClient } from "@/lib/supabase/server";
 import type { AppRole } from "@/lib/roles";
 import { createVerifiedSessionCookie, verifiedSessionCookieMaxAge, verifiedSessionCookieName } from "@/lib/auth-assurance";
+import { getPendingConfirmationEmail, setPendingConfirmationEmail } from "@/lib/auth-verification";
 import {
   decryptEmailOtpChallenge,
   digestEmailOtp,
@@ -123,18 +124,21 @@ async function destinationForRole(supabase: NonNullable<Awaited<ReturnType<typeo
 export async function signIn(_state: AuthState, formData: FormData): Promise<AuthState> {
   const parsed = credentials.safeParse({ email: formData.get("email"), password: formData.get("password") });
   if (!parsed.success) return { error: "Enter a valid email and password (at least 10 characters)." };
-  if (!createOtpAdminClient() || !getEmailOtpConfig()) {
-    return { error: "Email verification is not configured yet. Please try again later." };
-  }
   const supabase = createPasswordProbe();
   if (!supabase) return { error: "Authentication is not configured yet. Please try again later." };
   const { data, error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error?.code === "email_not_confirmed") {
-    return { error: "Confirm your email before signing in. You can request another confirmation email below." };
+    await setPendingConfirmationEmail(parsed.data.email);
+    redirect("/login/verify?step=confirmation");
   }
   if (error) return { error: "We could not sign you in. Check your details and try again." };
   if (!data.user || !data.session) return { error: "We could not sign you in. Check your details and try again." };
-  return startEmailOtp(data.user, data.session);
+  if (!createOtpAdminClient() || !getEmailOtpConfig()) {
+    return { error: "Email verification is not configured yet. Please try again later." };
+  }
+  const result = await startEmailOtp(data.user, data.session);
+  if (result.otpRequired) redirect("/login/verify?step=otp");
+  return result;
 }
 
 export async function verifyLoginEmailOtp(_state: AuthState, formData: FormData): Promise<AuthState> {
@@ -266,11 +270,13 @@ export async function signUp(_state: AuthState, formData: FormData): Promise<Aut
     await supabase.auth.signOut({ scope: "local" });
     return { error: "Email confirmation is disabled in the Supabase project. Please contact support before creating an account." };
   }
-  return { success: "We've sent a confirmation email. Open it to verify your address, then come back here to sign in. Check your spam folder if it doesn't arrive." };
+  await setPendingConfirmationEmail(parsed.data.email);
+  redirect("/login/verify?step=confirmation&sent=1");
 }
 
 export async function resendSignupConfirmation(_state: AuthState, formData: FormData): Promise<AuthState> {
-  const email = z.string().trim().email().max(254).safeParse(formData.get("email"));
+  const emailValue = formData.get("email") || await getPendingConfirmationEmail();
+  const email = z.string().trim().email().max(254).safeParse(emailValue);
   if (!email.success) return { error: "Enter a valid email address." };
   const supabase = await createClient();
   if (!supabase) return { error: "Authentication is not configured yet. Please try again later." };
@@ -283,6 +289,7 @@ export async function resendSignupConfirmation(_state: AuthState, formData: Form
     options: { emailRedirectTo: `${siteUrl}/auth/callback` }
   });
   if (error) return { error: "We couldn't request a new email right now. Check the address and try again later." };
+  await setPendingConfirmationEmail(email.data);
   return { success: "If this address has an account waiting for confirmation, a new email is on its way." };
 }
 
