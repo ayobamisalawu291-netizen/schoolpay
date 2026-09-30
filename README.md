@@ -9,7 +9,7 @@ SchoolPay is a parent portal foundation for a U.S. launch beginning in Virginia.
 3. Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from a dedicated SchoolPay Supabase project.
 4. Apply the migrations in `supabase/migrations` in timestamp order. The dedicated SchoolPay staging project already has Phases 1–3 and the email OTP challenge migration applied.
 5. In Supabase Auth, enable email confirmation, set the local and production Site URLs, and allow `/auth/callback` as a redirect URL for verification and password recovery.
-6. Configure Resend as described below before testing signup or sign-in.
+6. Configure a mail sender for both Supabase Auth and sign-in OTP as described below before testing signup or sign-in.
 7. Start the development server with `npm run dev`.
 
 Without Supabase configuration, public pages are available and account pages explain that SchoolPay is not configured. The application creates no local mock identity, school, child, invoice, or financial state.
@@ -20,10 +20,13 @@ Without Supabase configuration, public pages are available and account pages exp
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: public/publishable key for that project.
 - `NEXT_PUBLIC_SITE_URL`: canonical site URL. Set this before production so canonical metadata, robots, and sitemap point to the deployed domain.
 - `SUPABASE_SECRET_KEY`: Supabase server-only secret key used to manage OTP challenges and encrypt the pending sign-in cookie. The legacy `SUPABASE_SERVICE_ROLE_KEY` name also works. Never expose either through a `NEXT_PUBLIC_` variable.
-- `RESEND_API_KEY`: Resend sending key used by the server to deliver sign-in codes. Restrict the key to sending from SchoolPay's verified domain.
-- `AUTH_EMAIL_FROM`: verified sender, such as `SchoolPay <auth@your-domain.com>`.
+- `AUTH_SMTP_HOST`, `AUTH_SMTP_PORT`, `AUTH_SMTP_USER`, `AUTH_SMTP_PASS`: SMTP server, port (`465` or `587`), account, and password used for sign-in codes. For a temporary Gmail sender, use `smtp.gmail.com`, port `465`, the full Gmail address, and a Google App Password. Keep the password server-only.
+- `AUTH_EMAIL_FROM`: sender address matching the SMTP account, such as `SchoolPay <your-address@gmail.com>`.
+- `RESEND_API_KEY`: optional alternative to SMTP for sign-in codes. Resend requires a verified sending domain to reach other users; restrict its key to that domain.
 
-The same Resend account must also be configured as Supabase Auth's custom SMTP sender so it can deliver signup confirmation and password reset emails. In **Supabase → Authentication → Emails → SMTP Settings**, use `smtp.resend.com`, port `465`, username `resend`, the Resend API key as the password, and a sender on your verified domain. Keep email confirmation enabled and allow `http://localhost:3000/auth/callback` during local development plus the production callback URL before deployment. Without these provider settings, signup mail and the second sign-in step cannot be delivered.
+Configure the same sender in **Supabase → Authentication → Emails → SMTP Settings** so Supabase can deliver signup confirmation and password reset emails. For Gmail, use `smtp.gmail.com`, port `465`, the full Gmail address as username, its Google App Password, and the matching sender address. Google App Passwords require two-step verification and must be created by the account owner. Keep email confirmation enabled, set the Supabase Site URL to the production site, and allow `https://schoolpay-ten.vercel.app/auth/callback` plus `http://localhost:3000/auth/callback` for local development. Without Supabase custom SMTP and the app's OTP mail settings, new users cannot reliably confirm accounts or finish signing in.
+
+Gmail SMTP is a temporary sender and has provider rate limits. Before opening registration to a larger audience, use a dedicated domain and transactional mail provider with verified DNS records and delivery monitoring.
 
 Sign-in checks the password first, sends a six-digit code to the registered email, and creates the app session only after the code is verified. Codes expire after ten minutes, allow up to five attempts, and are rate limited per user. OTP rows are stored in the private schema and are not directly accessible to browser roles.
 
