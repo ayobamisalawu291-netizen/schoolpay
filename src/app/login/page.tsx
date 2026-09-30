@@ -17,7 +17,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
       <Link className="brand" href="/"><span className="brand-mark">S</span><span>school<span className="brand-pay">pay</span></span></Link>
       <h2>Welcome back</h2>
       <p>Log in to your SchoolPay account.</p>
-      {params.confirmed === "1" && <p className="form-message success" role="status">Email confirmed. Sign in to receive your verification code.</p>}
+      {params.confirmed === "1" && <p className="form-message success" role="status">Email confirmed. Sign in with your email and password; we’ll send a one-time code before opening your account.</p>}
       {params.password === "updated" && <p className="form-message success" role="status">Password updated. Sign in with your new password.</p>}
       <AuthForm mode="login" />
       <p className="auth-switch"><Link href="/forgot-password">Forgot your password?</Link></p>
